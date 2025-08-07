@@ -1,0 +1,1847 @@
+---
+title: "Do man and women write academic papers in a different way?"
+output: html_notebook
+---
+
+## Project - Do man and women write academic papers in a different way?
+
+### Introduction
+
+The main goal of our project is to investigate whether men and women use different vocabulary when discussing the same topic in academic papers and research. Specifically, we aim to explore the type of language they use and, consequently, the kind of narrative they construct around that topic.
+
+To do so, we have decided to focus our project on one particular subject that we believe is both unique and meaningful: the bullying culture in the United States of America. The reasons why we decided to concentrate our project on this very specific subject and this county are:
+
+-   we wanted to conduct our analysis on a more humanitarian subject rather than a scientific one. Our concern was that the high level of technical language often used in scientific papers might make it increasingly difficult to compare the writing styles of male and female authors.
+
+-   we wanted to focus on a theme that remains highly relevant today but is not entirely new, something that the academic world has already had time to examine and explore from multiple perspectives and to write about. For this reason, bullying seems to us the most interesting choice.
+
+and
+
+-   we decided to center our project on the United States because it is one of the most prolific countries in terms of academic production on this issue—or, at the very least, it was the origin of the majority of the papers we were able to find online.
+
+## Libraries
+
+```{r,warning=FALSE,message=FALSE}
+library(pdftools)
+library(dplyr)
+library(stringr)
+library(tidytext)
+library(tibble)
+library(pdftools)
+library(purrr)
+library(ggplot2)
+library(forcats)
+library(tidyr)
+library(tidyverse)
+library(ggraph)
+library(igraph)
+library(widyr)
+library(grid)
+library(topicmodels)
+
+```
+
+## Data cleaning and Tokenizing
+
+```{r}
+# Import the essays 
+
+Notes_on_a_Sociology_of_Bullying_raw <- pdf_text("./Docs/female1.pdf")
+Arab_American_Adolescents_Perceived_Stress_and_Bullying_Experiences_raw <- pdf_text("./Docs/female2.pdf")
+Immigrant_children_and_school_bullying_raw <- pdf_text("./Docs/female3.pdf")
+LGBTQ_Kids_School_Safety_raw <- pdf_text("./Docs/female4.pdf")
+Regulating_Girlhood_raw <- pdf_text("./Docs/female5.pdf")
+A_Qualitative_Investigation_of_Bullying_raw <- pdf_text("./Docs/male1.pdf")
+Bullying_Victimization_Among_Music_Ensemble_in_USA_raw <- pdf_text("./Docs/male2.pdf")
+Bullying_and_Being_Bullied_raw  <- pdf_text("./Docs/male3.pdf")
+Bullying_in_Schools_raw <- pdf_text("./Docs/male4.pdf")
+Mental_Health_and_Bullying_USA_raw <- pdf_text("./Docs/male5.pdf")
+
+```
+
+For each of the ten research papers(5 written by female authors and 5 by male authors) included in our analysis, we need to carry out some preparatory work before applying the various methods for text analysis:
+
+1)  First, we need to import the PDFs and perform data cleaning to ensure we retain all and only the parts of the texts that are useful for our analysis.
+
+2)  Each essay will be divided into four broad sections: 'abstract', 'introduction','body' of the research and 'conclusion' Given the structural differences across papers, we decided to adopt these general and flexible categories. This approach allows for a more detailed analysis of each part and enables us to exclude specific sections (for example the abstract) from the analysis if necessary.
+
+3)  We have then transform the papers in tibbles; every tibble has 2 variables: 'part' ('abstract, 'introduction', 'body' and 'conclusion'), 'text' (the actual part of the text from the paper), 'essay' (the title of the academic papers) and 'gender' (it's a binary variable, in this one we have storage the gender of the main author[s] of the essay)
+
+4)  We have tokenize the tibble
+
+```{r}
+# Clean and preprocess the raw text
+
+Notes_on_a_Sociology_of_Bullying <- Notes_on_a_Sociology_of_Bullying_raw |> 
+  str_c(collapse = " ") |>                                       
+  str_replace_all("\n", " ") |>                                   
+  str_replace_all("Downloaded from .*? on .*? ", " ") |>          
+  str_replace_all("This content downloaded from .*?terms", " ") |> 
+  str_replace_all("Stable URL.*?jstor\\.org.*?\\s+", " ") |>      
+  str_replace_all("Page \\d+[–-]\\d+|\\[\\d+\\]", " ") |>         
+  str_replace_all("©.*?(University|Press|ISSN).*?\\s+", " ") |>   
+  str_remove_all("Notes on a Sociology of Bullying(\\s+\\d{2,3})?") |>  
+  str_remove_all("C\\s*J\\s*Pascoe") |>                                 
+  str_replace_all("Young Men s Homophobia as Gender Socialization Author s C J Pascoe.*?Worldmaking", " ") |> 
+  str_replace_all(".*?(?=ABSTRACT)", " ") |>  
+  str_remove("ABSTRACT") |>    
+  str_replace_all("Copyright.*?All rights reserved.*?\\s+", " ") |> 
+  str_replace_all("NOTES.*", "") |>                               
+  str_replace_all("[^A-Za-z0-9 ]", " ") |>                        
+  str_replace_all("\\s+", " ") |>                                 
+  str_trim()  
+
+# dividing the essay into parts 
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "Popular and academic discourses frame",
+    "When I started researching adolescent masculinity over a decade ago",
+    "Framing Bullying Current popular and academic understandings of bullying its causes defini tions participants effects and solutions are largely framed by psychological research",
+    "Rethinking Bullying So why didn t I specifically address bullying in a book focused on young men s gender based homophobic interactions"
+  ),
+  end = c(
+    "not unique to young people but reflects larger structural inequalities",
+    "bullying not just in terms of gender and sexuality but along other lines of inequality as well such as body size race and class",
+    "acting out structural and cultural inequalities in their interactions",
+    "cultural inequalities that these kids are playing out interactionally"
+  )
+)
+
+# Combine it into a tibble
+
+Pascoe_essay <- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(Notes_on_a_Sociology_of_Bullying, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "Notes on a Sociology of Bullying", Gender = "female") |> 
+  select(-start, -end)
+
+# Tokenizing
+
+tidy_Pascoe_essay <- Pascoe_essay |> 
+  unnest_tokens(word, text) 
+
+head(tidy_Pascoe_essay)
+
+```
+
+The same process will be repeated for all the other 9 essay that we will analyze.
+
+```{r}
+Arab_American_Adolescents_Perceived_Stress_and_Bullying_Experiences <- Arab_American_Adolescents_Perceived_Stress_and_Bullying_Experiences_raw |>
+  str_c(collapse = " ") |>
+  str_replace_all("\n\\s*\\d+\\s*", " ") |>
+  str_replace_all("Table\\s*\\d+\\..*?(?=(\\n\\n|\\n[A-Z]))", " ") |>
+  str_replace_all("Albdour et al\\.", " ") |>
+  str_replace_all("(?s)^.*?Abstract", "Abstract") |>
+  str_remove("Abstract") |>  
+  str_replace_all("(?s)Keywords.*?Arab Americans are described as", "Arab Americans are described as") |>
+  str_replace_all("(?s)Acknowledgments.*", " ") |>
+  str_replace_all("\\([^\\)]*\\)", " ") |>
+  str_replace_all("Western Journal of Nursing Research\\s*[^a-zA-Z]*", " ") |>
+  str_replace_all("[[:punct:]]", " ") |>
+  str_replace_all("\\s+", " ") |>
+  str_trim()
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "In 2012 20 of high school students were bullied in the United States Bullying",
+    "Arab Americans are described as the invisible population",
+    "Bullying Stress Perceived Stress and Adolescent Health Bullying is defined as any repeated attack",
+    "Our study findings were consistent with past studies conducted in the United States"
+  ),
+  end = c(
+    "Implications for practice and future research were discussed",
+    "It is not surprising that Arab American students frequently experience bullying in school",
+    "to being bullied by their peers",
+    "coping strategies that can be adapted to the unique culture and experiences of Arab American adolescents"
+  )
+)
+
+Albdour_essay <- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(Arab_American_Adolescents_Perceived_Stress_and_Bullying_Experiences, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "Arab American Adolescents", Gender = "female") |> 
+  select(-start, -end)
+
+tidy_Albdour_essay <- Albdour_essay |> 
+  unnest_tokens(word, text)
+
+head(tidy_Albdour_essay)
+```
+
+```{r}
+Immigrant_children_and_school_bullying <- Immigrant_children_and_school_bullying_raw |>
+ str_c(collapse = " ") |>
+  str_replace_all("\n\\s*\\d+\\s*", " ") |>  
+  str_replace_all("Table\\s*\\d+\\..*?(?=(\\n\\n|\\n[A-Z]))", " ") |>  
+  str_replace_all("(?s)^.*?Abstract", "Abstract") |> 
+  str_remove("Abstract") |> 
+  str_replace_all("(?s) whether parents and teachers are sufficiently aware of their victimization.*?Introduction", " whether parents and teachers are sufficiently aware of their victimization Introduction") |>  
+  str_replace_all("unnoticed by adults than those who had .*?only US-born parent", "unnoticed by adults than those who had only US-born parent") |>  
+  str_replace_all("International Journal of Sociology\\s+and Social Policy", " ") |>
+  str_replace_all("© Emerald Publishing Limited", " ") |>
+  str_replace_all("0144-333X", " ") |>
+  str_replace_all("DOI 10\\.1108/IJSSP-\\d{2}-\\d{4}", " ") |>
+  str_replace_all("\\([^\\)]*\\)", " ") |>
+  str_replace_all("IJSSP", " ") |>
+  str_replace_all("(?s)Household income was a variable provided by the ECLS and it was collected during the parent interview.*?Analytic approach Immigrant The hierarchical linear model was used to answer", 
+                  "Analytic approach Immigrant The hierarchical linear model was used to answer") |>
+  str_replace_all("(?s)Third, parents and teachers should keep good.*?environment where all children will feel and be safe[^\\.]*\\.?\\s*.*", 
+                  "Third, parents and teachers should keep good communication with children, be cautious of warning signs of bullying and ultimately work together to establish an environment where all children will feel and be safe") |>
+  str_replace_all("[[:punct:]]", " ") |>  
+  str_replace_all("\\s+", " ") |>       
+  str_trim()
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "Purpose The current study aims",
+    "Introduction School bullying is a social problem affecting many children",
+    "Methods Data source I used publically available data",
+    "Conclusion Common methods used for assessing children"
+  ),
+  end = c(
+    "whether parents and teachers are sufficiently aware of their victimization",
+    "in the ECLS peer victimization was reported by children teachers and parents",
+    "research could seek to investigate how patterns suggested by this study vary over time",
+    "establish an environment where all children will feel and be safe"
+  )
+)
+
+Morales_essay<- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(Immigrant_children_and_school_bullying, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "Immigrant children and school bullying", Gender = "female") |> 
+  select(-start, -end)
+
+tidy_Morales_essay <- Morales_essay |> 
+  unnest_tokens(word, text)
+
+head(tidy_Morales_essay)
+
+```
+
+```{r}
+LGBTQ_Kids_School_Safety <- LGBTQ_Kids_School_Safety_raw |>
+  str_c(collapse = " ") |>
+  str_replace_all("(?s)^.*?(ABSTRACT)", "\\1") |>  
+  str_remove("ABSTRACT") |> 
+  str_replace_all("(?s)account for relationships between peer targeting and\\s+structural inequalities\\..*?In the past few years, bullying as a social phenomenon has gained greater\\s+visibility", 
+                  "account for relationships between peer targeting and structural inequalities. In the past few years, bullying as a social phenomenon has gained greater visibility") |>  
+  str_replace_all("This content downloaded from\\s+.*?\\s+All use subject to https://about\\.jstor\\.org/terms", " ") |>  
+  str_replace_all("Elizabethe Payne and Melissa Smith", " ") |>  
+  str_replace_all("LGBTQ Kids, School Safety, and Missing the Big Picture", " ") |>  
+  str_replace_all("(?s)NOTES.*", " ") |>  
+  str_replace_all("[^A-Za-z0-9 ]", " ") |>  
+  str_replace_all("\\s+", " ") |>  
+  str_trim()
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "Dominant understanding of LGBTQ students school",
+    "In the past few years bullying as a social phenomenon has gained",
+    "Methods The data excerpts utilized in this article",
+    "Rethinking Bullying The literature reviewed here"
+  ),
+  end = c(
+    "between peer targeting and structural inequalities",
+    "practices of schooling not in individual aggressive children",
+    "the enforce ment of heterosexist homophobic hegemony",
+    " that have any hope of creating sustainable change"
+  )
+)
+
+Payne_essay<- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(LGBTQ_Kids_School_Safety, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "LGBTQ kids school safety", Gender = "female") |> 
+  select(-start, -end)
+
+tidy_Payne_essay <- Payne_essay |> 
+  unnest_tokens(word, text)
+
+head(tidy_Payne_essay)
+```
+
+```{r}
+Regulating_Girlhood <- Regulating_Girlhood_raw |> 
+   str_c(collapse = " ") |>  
+  str_replace_all("\n", " ") |>  
+  str_replace_all(".*?(School shootings)", "\\1") |>  
+  str_remove("Bullying representations and policies must address the relationship between social inequality and bullying, including to which inequalities within social categories of race, class, g sexuality continue to produce violence, as well as the way social categories continue to frame which acts of violen visible.*") |>  
+  str_remove_all("jac\\s*\\d+\\.\\d+-\\d+\\s*\\(\\d{4}\\)") |>  
+  str_remove_all("\\d{3,}\\s+jac") |>  
+  str_remove_all("This content downloaded from\\s*\\d+\\.\\d+\\.\\d+\\.\\d+.*?about\\.jstor\\.org/terms") |>  
+  str_remove_all("Wendy Wolters Hinshaw") |>  
+  str_replace_all("[^A-Za-z0-9 ]", " ") |>  
+  str_replace_all("\\s+", " ") |>  
+  str_trim()
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "",
+    "School shootings by students at the end",
+    "Prosecuting M As concerns over",
+    "Conclusion Zero tolerance policies"
+  ),
+  end = c(
+    "",
+    "criminalization and minority youth in particular",
+    "upcriming and youth criminaliz the name of some students safety",
+    "our criminalizing policies and pedagogies"
+  )
+)
+
+Hinshaw_essay <- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(Regulating_Girlhood, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "Regulating girlhood", Gender = "female") |> 
+  select(-start, -end)
+
+tidy_Hinshaw_essay <- Hinshaw_essay |> 
+  unnest_tokens(word, text)
+
+head(tidy_Hinshaw_essay)
+```
+
+```{r}
+A_Qualitative_Investigation_of_Bullying <- A_Qualitative_Investigation_of_Bullying_raw |> 
+   str_c(collapse = " ") |>  
+  str_replace_all("\n", " ") |>  
+  str_replace_all(".*?(ABSTRACT\\s+Quantitative analyses)", "\\1") |> 
+  str_remove("ABSTRACT") |> 
+  str_remove_all("Please address correspondence to:.*?Downloaded from spi\\.sagepub\\.com.*?March 23, 2015") |>  
+  str_remove_all("School Psychology International \\(2003\\), Vol\\. 24\\(4\\)") |>  
+  str_remove_all("Gamliel et al\\.: A Qualitative Investigation of Bullying") |>  
+  str_replace_all("Males selected ‘Avoid the bully’ as their first choice\\..*?Qualitatively, the mean rank order across genders seemed very similar\\.", "Qualitatively, the mean rank order across genders seemed very similar.") |>  
+  str_replace("Notes\\s*The study is based on the first author.*", "") |>  
+  str_replace_all("[^A-Za-z0-9 ]", " ") |>  
+  str_replace_all("\\s+", " ") |> 
+  str_trim()
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "Quantitative analyses of survey or observational",
+    "Little doubt remains that bullying",
+    "Methods Setting The investigation",
+    "Discussion Respondents opted for calm rational"
+  ),
+  end = c(
+    "ineffectual when it came to dealing with aggression",
+    "explain experience and manage bully ing",
+    "acting like one is unafraid slightly higher than did females",
+    "in the male culture of this semi rural community"
+  )
+)
+
+Gamiel_essay <- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(A_Qualitative_Investigation_of_Bullying, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "A qualitative investigation of bullying", Gender = "male") |> 
+  select(-start, -end)
+
+tidy_Gamiel_essay <- Gamiel_essay |> 
+  unnest_tokens(word, text)
+
+head(tidy_Gamiel_essay)
+```
+
+```{r}
+Bullying_Victimization_Among_Music_Ensemble_in_USA <- Bullying_Victimization_Among_Music_Ensemble_in_USA_raw |> 
+  str_c(collapse = " ") |>  
+  str_replace_all("\n", " ") |>  
+  str_replace_all(".*?(Abstract)", "\\1") |>  
+  str_remove("Abstract") |> 
+  str_replace_all("Though incidents of experiencing\\s+hate speech were rare, music and theatre students faced a significantly greater risk of\\s+hate speech victimization than non-arts students.*?One of the more troubling forms of aggressive behavior", 
+                  "One of the more troubling forms of aggressive behavior") |>  
+  str_remove_all("EJpus and Carter\\s+\\d+") |>
+  str_remove_all("\\d+\\s+Journal of Research inMusic Education 64\\(3\\)") |>
+  str_remove_all("This content downloaded from\\s+.*?about\\.jstor\\.org/terms") |>  
+  str_replace_all("music ensemble and theatre students were significantly more likely than non-\\s+participants to be victimized by bullies; the odds ratio \\(OR\\) suggests that female music.*?and theatre students were 41% more likely", 
+                  "and theatre students were 41% more likely") |>  
+  str_replace_all("effect and interacted logistic regression coefficients revealed that the risk for\\s+male music and theatre students was 69% greater than the risk for non-arts students.*?\\(OR = 1\\.69", 
+                  "(OR = 1.69") |>  
+  str_replace_all("Multiplying the predicted probabilities\\s+reported in the various cells of Table 3 by 10 yields the percentage chance that a stu-\\s+dent with the indicated characteristics in the cell's row stub will be victimized by the\\s+bullying behaviors indicated at the top of each cell's column\\..*?As seen in Table 3", 
+                  "As seen in Table 3") |>  
+  str_replace("programs and teacher professional development can and should prepare\\s+preservice teachers and support in-service teachers in helping all of their students to\\s+avoid becoming bullies and to overcome bullying victimization\\..*", 
+              "programs and teacher professional development can and should prepare preservice teachers and support in-service teachers in helping all of their students to avoid becoming bullies and to overcome bullying victimization.") |>  
+  str_replace_all("[^A-Za-z0-9 ]", " ") |>  
+  str_replace_all("\\s+", " ") |>  
+  str_trim()  
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "The purpose of this study was to analyze",
+    "One of the more troubling forms of aggressive behavior",
+    "Purpose of the Study and Research Questions",
+    "Discussion In the present study"
+  ),
+  end = c(
+    "victimization through social relational aggression",
+    "and to students who do not study the arts",
+    "The difference is statistically significant p 009",
+    "avoid becoming bullies and to overcome bullying victimization"
+  )
+)
+
+Elpus_essay <- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(Bullying_Victimization_Among_Music_Ensemble_in_USA, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "Bullying Victimization", Gender = "male") |> 
+  select(-start, -end)
+
+tidy_Elpus_essay <- Elpus_essay |> 
+  unnest_tokens(word, text)
+
+head(tidy_Elpus_essay)
+```
+
+```{r}
+Bullying_and_Being_Bullied <- Bullying_and_Being_Bullied_raw |>
+  str_c(collapse = " ") |>  
+  str_replace_all("\n", " ") |>  
+  str_replace_all(".*?(The purpose of this study was to examine the victim-bully cycle in middle school)", "Abstract \\1") |>
+  str_remove("Abstract") |> 
+  str_remove_all("XIN MA is Associate Professor.*?statistical methods\\.\\s*") |>
+  str_remove_all("This content downloaded from\\s*163\\.117\\.64\\.8 on Fri, 11 Apr 2025 16:42:23 UTC\\s*All use subject to https://about\\.jstor\\.org/terms") |>
+  str_remove_all("\\bMa\\b") |>
+  str_remove_all("Bullying in Middle School") |>
+  str_remove_all("\\([^\\)]*\\)") |>
+  str_replace_all("It is a three-level hierarchical linear model HLM .*? level, and a school model at the third level\\.", "") |>
+  str_replace_all("If this variable is not significantly related to the base .*? Among student-level variables, SES is a stand", "Among student-level variables, SES is a stand") |>
+  str_replace_all("In contrast, both SES and the number of parents showed an equivalently shared effect on victims and bullies that was statistically null\\..*?school size", "school size") |>
+  str_replace_all("There was a difference of 6% of a standard.*?deviation between students with poor affective and who were victims", "deviation between students with poor affective and who were victims") |>
+  str_replace("Depending on the proportion of students classi with either of these disorders, the results of this study could be modified some degree.*", 
+              "Depending on the proportion of students classi with either of these disorders, the results of this study could be modified some degree") |>
+  str_replace_all("[^A-Za-z0-9 ]", " ") |>
+  str_replace_all("\\s+", " ") |>
+  str_trim()
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "The purpose of this study was",
+    "School violence traditionally refers",
+    "Method Data New Brunswick located",
+    "Discussion The major purpose of this study was to examine"
+  ),
+  end = c(
+    "discouraged bullies more than helped victims",
+    "questions was also asked for school level characteristics",
+    "the difference in en rollment increases between schools",
+    "results of this study could be modified some degree"
+  )
+)
+
+Ma_essay <- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(Bullying_and_Being_Bullied, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "Bullying and being bullied", Gender = "male") |> 
+  select(-start, -end)
+
+tidy_Ma_essay <- Ma_essay |> 
+  unnest_tokens(word, text)
+
+head(tidy_Ma_essay)
+```
+
+```{r}
+Bullying_in_Schools <- Bullying_in_Schools_raw |> 
+str_c(collapse = " ") |>  
+  str_replace_all("\n", " ") |>  
+  str_replace_all(".*?(INTRODUCTION)", "\\1") |>  
+  str_remove("INTRODUCTION") |> 
+  str_remove_all("Correspondence to:.*?Wiley-Liss, Inc\\.") |>  
+  str_remove_all("\\d+\\s+Smith and Brain") |>
+  str_remove_all("Bullying in Schools\\s+\\d+") |>  
+  str_remove_all("\\[.*?\\]") |>  
+  str_replace("REFERENCES.*", "") |>  
+  str_replace_all("[^A-Za-z0-9 ]", " ") |>
+  str_replace_all("\\s+", " ") |>
+  str_trim()
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "",
+    "Bullying is usually defined as a subset",
+    "HISTORY OF RESEARCH ON SCHOOL BULLYING",
+    "OVERVIEW OF THE SPECIAL ISSUE"
+  ),
+  end = c(
+    "",
+    "characterized democratic countries in the twentieth century",
+    "Australian work of himself and his colleagues",
+    "researchers and practitioners to try to achieve"
+  )
+)
+
+Smith_essay <- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(Bullying_in_Schools, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "Bullying in schools", Gender = "male") |> 
+  select(-start, -end)
+
+tidy_Smith_essay <- Smith_essay |> 
+  unnest_tokens(word, text)
+
+head(tidy_Smith_essay)
+```
+
+```{r}
+Mental_Health_and_Bullying_USA <- Mental_Health_and_Bullying_USA_raw |> 
+  str_c(collapse = " ") |>  
+  str_replace_all("\n", " ") |>  
+  str_replace_all(".*?(Abstract)", "\\1") |> 
+  str_remove("Abstract") |> 
+  str_replace("In particular, depression, anxiety, and ADHD are strongly associated\\s+.*?\\s+with being identified as a bully\\.", 
+              "In particular, depression, anxiety, and ADHD are strongly associated with being identified as a bully.") |>  
+  str_remove_all("Turcotte Benedict et al\\.\\s+\\d+") |>  
+  str_remove_all("\\d+\\s+Journal of Interpersonal Violence.*?") |>  
+  str_remove_all("Downloaded from .*? at .*? on .*?") |>  
+  str_replace("child communication 0\\.2%, and for type of school 0\\.36%.*?with nearly 30% of children with mental health disorders", 
+              "child communication 0.2%, and for type of school 0.36%. with nearly 30% of children with mental health disorders") |>  
+  str_replace("being identified as a bully\\. Furthermore, a.*?sub-analysis by type of mental health disorder", 
+              "being identified as a bully. sub-analysis by type of mental health disorder") |>  
+  str_replace("Acknowledgments.*", "") |>  
+  str_replace_all("[^A-Za-z0-9 ]", " ") |>  
+  str_replace_all("\\s+", " ") |>  
+  str_trim()
+
+sections <- tibble(
+  part = c("abstract", "introduction", "body", "conclusion"),
+  start = c(
+    "This article examines the association",
+    "Introduction Bullying is a specific form",
+    "Method Data Set Data from the 2007",
+    "Discussion While victims of bullying"
+  ),
+  end = c(
+    "mental health and violence youth violence",
+    "those without a diagnosis of a mental health disorder",
+    "ADHD each had a threefold or nearly threefold increased odds of being a bully Table 2",
+    "most valuable in creating bullying prevention programs"
+  )
+)
+
+Turcotte_essay <- sections |> 
+  mutate(text = map2_chr(start, end, ~ str_extract(Mental_Health_and_Bullying_USA, str_c(.x, ".*?", .y)))) |>
+  mutate(text = str_trim(text)) |> 
+  mutate(essay = "Mental health and bullying", Gender = "male") |> 
+  select(-start, -end)
+
+tidy_Turcotte_essay <- Turcotte_essay |> 
+  unnest_tokens(word, text)
+
+head(tidy_Turcotte_essay)
+```
+
+## A quick look at the data that we have so far
+
+Now that we have got our tidy version of the essays we can unite them in two separate ad distinct datasets based on the gender of the authours.
+
+```{r}
+# Unite all the essay written by females and males in two distinct datasets and one where everything is combined 
+
+combined_female <- bind_rows(tidy_Pascoe_essay, tidy_Albdour_essay, tidy_Payne_essay, tidy_Hinshaw_essay, tidy_Morales_essay)
+
+combined_male <- bind_rows(tidy_Gamiel_essay, tidy_Elpus_essay, tidy_Ma_essay, tidy_Turcotte_essay, tidy_Smith_essay)
+
+combined_tot <- bind_rows(tidy_Pascoe_essay, tidy_Albdour_essay, tidy_Payne_essay, tidy_Hinshaw_essay, tidy_Morales_essay, tidy_Gamiel_essay, tidy_Elpus_essay, tidy_Ma_essay, tidy_Turcotte_essay, tidy_Smith_essay )
+
+```
+
+Done that we can remove all the stop words from our combined tidy datasets in order to have only the data that we need for the analysis.
+
+```{r}
+combined_female <- combined_female |> 
+  anti_join(stop_words)
+
+combined_male <- combined_male |> 
+  anti_join(stop_words)
+
+combined_tot <- combined_tot |> 
+  anti_join(stop_words)
+```
+
+## TF-IDF analysis
+In this study, our goal is to compare whether male and female authors use different language when discussing the same topic—bullying in American schools. While simple term frequency can show us the most commonly used words, it often highlights generic terms (like “school” or “bullying”) that are frequent across all texts, making it difficult to capture the words that are truly representative of a specific article.
+
+To address this, we introduced TF-IDF analysis. This method takes into account not only how often a word appears in a single document (TF), but also how common or rare that word is across the entire set of documents (IDF). It allows us to:
+
+1. Identify important, distinctive words in each article;
+
+2. Detect keywords that reflect the writer’s unique style or thematic focus;
+
+3. Compare gender-based differences in word use and emphasis.
+
+
+Firstly, we count the frequency of words in the female author text, the male author text, and the overall text, and sorts them in descending order of occurrence.
+This is the first step before we proceed to the subsequent analysis, which aims to get an initial idea of which words are used most frequently in the corpus.
+
+```{r}
+n_combined_f <- combined_female |> 
+  count(word, sort = TRUE) |> 
+  print()
+
+n_combined_m <- combined_male |> 
+  count(word, sort = TRUE) |> 
+  print()
+
+n_combined_tot <- combined_tot |> 
+  count(word, sort = TRUE) |> 
+  print()
+```
+
+We can also depict them with some plots to understand better the variance.
+
+```{r}
+combined_female|> 
+  count(word, sort = TRUE) |> 
+  filter(n > 35) |> 
+  mutate(word = reorder(word, n)) |> 
+  ggplot(aes(n, word)) +
+  geom_col() +
+  labs(y = NULL,
+    title = "Most Used Words in combined_female"
+  )
+
+combined_male|> 
+  count(word, sort = TRUE) |> 
+  filter(n > 35) |> 
+  mutate(word = reorder(word, n)) |> 
+  ggplot(aes(n, word)) +
+  geom_col() +
+  labs(y = NULL,
+    title = "Most Used Words in combined_male"
+  )
+```
+
+We can also see, with a plot, the representation of the word frequency by gender proportion (although we should always keep in mind that in combined_female we have 14290 observation[=words] and in combined_male only 13157, with a total difference of 1133 more words in the essays written by women) and get an idea of the difference in term of style and narrative that man and woman have in this particular analysis.
+
+```{r}
+legend_order <- c(
+  ">90% male",      
+  "80–90% male",
+  "70–80% male",
+  "60–70% male",
+  "50–60% male",
+  "equal amount",
+  "55–60% female",
+  "60–70% female",
+  "70–80% female",
+  "80–90% female",
+  ">90% female"
+)
+
+combined_tot_prc <- n_combined_tot |> 
+  rename(n_tot = n) |> 
+  inner_join(n_combined_f |> rename(n_female = n), by = "word") |> 
+  mutate(percentage = (n_female / n_tot) * 100) |> 
+  print()
+
+combined_tot_prc_plot <- combined_tot_prc |>
+  filter(n_tot > 75) |> 
+  mutate(
+    color_bin = case_when(
+      percentage < 10 ~ ">90% male",
+      percentage < 20 ~ "80–90% male",
+      percentage < 30 ~ "70–80% male",
+      percentage < 40 ~ "60–70% male",
+      percentage < 50 ~ "50–60% male",
+      percentage == 50 ~ "equal amount",
+      percentage < 60 ~ "55–60% female",
+      percentage < 70 ~ "60–70% female",
+      percentage < 80 ~ "70–80% female",
+      percentage < 90 ~ "80–90% female",
+      TRUE ~ ">90% female"
+    ),
+    color_bin = factor(color_bin, levels = legend_order), 
+    word = reorder(word, n_tot)
+  )
+
+color_values <- c(
+  ">90% male"       = "#08306B",   
+  "80–90% male"     = "#2171B5",
+  "70–80% male"     = "#6BAED6",
+  "60–70% male"     = "#9ECAE1",
+  "50–60% male"     = "#DEEBF7",   
+  "equal amount"    = "#999999",   
+  "55–60% female"   = "#fde0dd",
+  "60–70% female"   = "#fcc5c0",
+  "70–80% female"   = "#fa9fb5",
+  "80–90% female"   = "#f768a1",
+  ">90% female"     = "#dd3497"
+)
+
+ggplot(combined_tot_prc_plot, aes(x = n_tot, y = word, fill = color_bin)) +
+  geom_col() +
+  scale_fill_manual(
+    values = color_values,
+    name = "Proportion Authors by gender",
+    breaks = legend_order  # <- explicitly use the same order here too
+  ) +
+  labs(
+    title = "Word Frequency by Gender Proportion",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+From a first look we can see that for words like 'mental', 'health', 'bullies', 'victims' and the others in deep light-blue are more common to find in essays written by man, on the other hands we have word as 'lgbtq', 'gender', 'anti','girls' and others in the shades of pink are more frequently used in research authored by women.
+
+Although word frequency statistics and gender ratio maps provide us with an initial impression of the high-frequency words in a text, and help us observe the differences in word preferences between male and female authors, these analytical methods still have limitations: they can only reflect the number of times a word occurs, and cannot determine the representativeness of this word in a particular article, and it is also difficult to capture the subtle differences in language styles of different groups of authors. To solve this problem, we introduce TF-IDF analysis, which is able to comprehensively measure the frequency of a word's use in an article and its rarity across all articles, thus more effectively identifying the keywords that are truly discriminative and representative of each article, and providing a more robust basis for an in-depth analysis of gender differences.
+
+### First step: how many times each word appears in each article
+Before starting the TF-IDF analysis, we first need to count the frequency of occurrence of each word in each paper. By counting the frequency of words used in each paper in the female and male author groups respectively, we can establish the use of words in specific contexts.
+
+The most common words in the female author's article include school, bullying, students, lgbtq, children, gender, social, and so on. The high occurrence of lgbtq and gender, for example, may indicate that female authors are more likely to interpret bullying from a gender and multicultural perspective.
+
+High frequency words such as health, victims, mental, music, theatre appeared in the male author's article in addition to common words such as bullying, school, students, suggesting that the male author was more likely to place bullying in a mental health and specific victimization group (e.g., music students, students with mental health issues) framework. discussed within the framework.
+```{r}
+bully_words_female <- combined_female %>%
+  count(essay, word, sort = TRUE)
+bully_words_female
+
+bully_words_male <- combined_male %>%
+  count(essay, word, sort = TRUE)
+bully_words_male
+
+```
+
+### Second step: how many total words there are in each article
+
+```{r}
+total_words_female <- bully_words_female %>%
+  group_by(essay) %>%
+  summarize(total = sum(n))
+total_words_female
+
+total_words_male <- bully_words_male %>%
+  group_by(essay) %>%
+  summarize(total = sum(n))
+total_words_male
+```
+
+### Third step
+
+Next, we add the total number of words for each article back into their respective word frequency data boxes. This way, we can have both the number of occurrences of the word (n) and the total number of words in the article (total) in each row of data
+```{r}
+bully_words_female <- left_join(bully_words_female, total_words_female)
+bully_words_female
+
+bully_words_male <- left_join(bully_words_male, total_words_male)
+bully_words_male
+```
+
+### Fourth step: calculate term frequency
+The purpose of this step is to calculate the term frequency of each word in each article, i.e., the number of times the word appears in the article as a proportion of the total number of words in the article.
+```{r}
+bully_words_female <- bully_words_female %>%
+  #we add a column for term_frequency in each article
+  mutate(term_frequency = n/total)
+bully_words_female
+
+bully_words_male <- bully_words_male %>%
+  #we add a column for term_frequency in each article
+  mutate(term_frequency = n/total)
+bully_words_male
+```
+
+### Fifth step: visualize distribution in collection
+
+Let's make a plot to see how words are distributed.
+As can be seen from both graphs, the frequency of most words is very low and concentrated near 0 for both female and male authors. This distribution suggests that most of the words in the text are rare words that appear only occasionally, while high-frequency words such as “bullying” and “school” are only a few. This feature is consistent with Zipf's law: in natural languages, word frequency distributions tend to be highly skewed.
+```{r}
+
+ggplot(bully_words_female, aes(term_frequency)) +
+  #we create the bars histogram
+  geom_histogram(show.legend = TRUE) 
+
+ggplot(bully_words_male, aes(term_frequency)) +
+  #we create the bars histogram
+  geom_histogram(show.legend = TRUE) 
+```
+
+### Sixth step: visualize distribution by articles
+
+Let's make multiple plots to see how words are distributed in each article.
+After completing the calculation of word frequency, we visualized its distribution in each article. As can be seen from the histograms, the frequency of most words is very low for both male and female authors, with only a very few high-frequency words. This distribution is consistent with Zipf's law, which states that the frequency of words is inversely proportional to their rank. This step helps us to understand the degree of concentration of words used in the articles: many words appear only once or very few times, while a few keywords (e.g., “bullying”, “school”) are used frequently.
+```{r}
+
+ggplot(bully_words_female, aes(term_frequency, fill = essay)) +
+  #we create the bars histogram
+  geom_histogram(show.legend = TRUE) +
+  #plot settings
+  facet_wrap(~essay, ncol = 2, scales = "free_y")
+
+ggplot(bully_words_male, aes(term_frequency, fill = essay)) +
+  #we create the bars histogram
+  geom_histogram(show.legend = TRUE) +
+  #plot settings
+  facet_wrap(~essay, ncol = 2, scales = "free_y")
+```
+
+### Zipf's Law
+We generated rankings for the words in each paper by their frequency of occurrence
+Table1 shows the number of times the keyword appeared in each of the five articles written by the female authors (n), the total number of words in that article (total), the term_frequency (term_frequency = n / total), and the rank of the word in that article (rank). For example, the word “school” appears 168 times in “LGBTQ kids school safety”, which is 3.16% of the total number of words in that article, making it the word with the highest word frequency (rank = 1). With this data, we can observe that some words such as “bullying”, ‘students’, and “lgbtq” in multiple articles by female authors have a high presence, reflecting the focus of their concerns when exploring bullying in schools.
+
+Table 2 presents an analysis of word frequency in five articles by male authors, again including the number of times the word appears in the text, the total number of words, the word frequency and the ranking. We can see, for example, that in “Mental health and bullying”, “health” is the most frequent word, accounting for 5.66% of the words in the article. These standardized word frequency metrics help us understand which concepts male authors tend to emphasize more when writing academic papers on bullying, such as “mental”, ‘victims’, " students," etc.
+```{r}
+freq_by_rank_female <- bully_words_female %>% 
+  group_by(essay) %>% 
+  #we create the column for the rank with row_number
+  mutate(rank = row_number()) %>%
+  ungroup()
+freq_by_rank_female
+
+freq_by_rank_male <- bully_words_male %>% 
+  group_by(essay) %>% 
+  #we create the column for the rank with row_number
+  mutate(rank = row_number()) %>%
+  ungroup()
+freq_by_rank_male
+```
+
+Let's visualize Zipf's Law in the Austen collection quickly by plotting rank on the x-axis and term frequency on the y-axis:
+These two graphs show the relationship between word frequency and word ranking, and the results show a typical power law distribution (Zipf's law), indicating that only a few words are used with high frequency in the article, while most words appear very infrequently, regardless of the male or female author.
+```{r}
+freq_by_rank_female %>% 
+  ggplot(aes(rank, term_frequency, color = essay)) + 
+  #plot settings
+  geom_line(linewidth = 1.1, alpha = 0.8, show.legend = TRUE)
+
+freq_by_rank_male %>% 
+  ggplot(aes(rank, term_frequency, color = essay)) + 
+  #plot settings
+  geom_line(linewidth = 1.1, alpha = 0.8, show.legend = TRUE)
+```
+
+These two graphs use a logarithmic scale to demonstrate the Zipf's Law in articles by male and female authors, showing that regardless of gender, word frequency decreases rapidly as words are ranked, in line with the general pattern of natural language.
+```{r}
+freq_by_rank_female %>% 
+  ggplot(aes(rank, term_frequency, color = essay)) + 
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) + 
+  scale_x_log10() +
+  scale_y_log10()
+
+freq_by_rank_male %>% 
+  ggplot(aes(rank, term_frequency, color = essay)) + 
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) + 
+  scale_x_log10() +
+  scale_y_log10()
+```
+
+### Measuring deviation
+
+We quantify the relationship between word frequency (term frequency) and word rank (rank) by linearly modeling the Zipf distribution. The regression results show that this indicates that regardless of gender, word frequency shows a very similar rate of decline as word rank rises (with a slope of about -0.81), further validating the applicability of the Zipf's law to the text you analyzed. In other words, regardless of the gender of the authors, their patterns of word usage are very consistent in their overall structure.
+```{r}
+rank_subset_female <- freq_by_rank_female %>% 
+  filter(rank < 500,
+         rank > 10)
+lm(log10(term_frequency) ~ log10(rank), data = rank_subset_female)
+
+rank_subset_male <- freq_by_rank_male %>% 
+  filter(rank < 500,
+         rank > 10)
+lm(log10(term_frequency) ~ log10(rank), data = rank_subset_male)
+```
+
+If we now add a line to our plot with these coefficients, we will be able to see more clearly the deviation. Let's paint the same plot for the slope, but with an extra guideline:
+
+```{r}
+freq_by_rank_female %>% 
+  ggplot(aes(rank, term_frequency, color = essay)) + 
+  #we add a line in the plot with the two coefficients we have found
+  geom_abline(intercept = -0.62, slope = -1.1, 
+              color = "gray50", linetype = 2) +
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) + 
+  scale_x_log10() +
+  scale_y_log10()
+
+freq_by_rank_male %>% 
+  ggplot(aes(rank, term_frequency, color = essay)) + 
+  #we add a line in the plot with the two coefficients we have found
+  geom_abline(intercept = -0.62, slope = -1.1, 
+              color = "gray50", linetype = 2) +
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) + 
+  scale_x_log10() +
+  scale_y_log10()
+```
+
+In this step, we use the bind_tf_idf() function to perform a TF-IDF analysis on the texts of female and male authors respectively, calculating the word frequency, the inverse document frequency, and the product of them for each word in each article. This helps us to identify the most representative and discriminating words in each article, instead of focusing only on the most frequent common words. In this way, we are able to gain a deeper understanding of the differences in expression and language styles between authors of different genders, providing a more informative basis for subsequent visualization and comparative analysis.
+```{r}
+tf_idf_female <- bully_words_female %>%
+  bind_tf_idf(word, essay, n)
+tf_idf_female
+
+tf_idf_male <- bully_words_male %>%
+  bind_tf_idf(word, essay, n)
+tf_idf_male
+```
+
+### Higher TF-IDF words
+
+In this step, we removed the unwanted total columns from the previously generated tf_idf_female and tf_idf_male datasets and sort them according to the TF-IDF values from highest to lowest in order to find the most recognizable keywords in each article.
+```{r}
+tf_idf_female %>%
+  #we exclude the total column which is not necessary now
+  select(-total) %>%
+  #we arrange by tf-idf in descending order
+  arrange(desc(tf_idf))
+
+tf_idf_male %>%
+  #we exclude the total column which is not necessary now
+  select(-total) %>%
+  #we arrange by tf-idf in descending order
+  arrange(desc(tf_idf))
+```
+In this part of the analysis, we combined the TF-IDF results by word for female and male authors, which were previously computed separately, and computed the TF-IDF difference (gap = female - male) for each word between the two groups of authors. This difference allowed us to identify which words were more representative of the female authors' texts and which were more common in the male authors' texts. We then extracted the top 10 words with the largest difference (female-biased) and the top 10 words with the smallest difference (male-biased) and created a visualization chart showing words with significant TF-IDF gaps.
+
+This graph shows which words are more gender-distinctive in female-dominated versus male-dominated texts in the ten academic papers we analyzed on school bullying. The horizontal axis represents the TF-IDF difference between female and male authors, with larger values indicating that the word is more representative and distinguishable in female-authored texts, and vice versa, meaning that the word is more prominent in male-authored texts. For example, “adolescents” (adolescents) and ‘participant’ (participant) are not only more frequent but also more distinguishable in texts written by female authors, while " music“ and ”mental" are expressions that male authors tend to use more often and are more recognizable in their context. The figure helps us to identify subtle differences in language style and discourse construction between the two types of authors.
+```{r}
+# Merge two tf-idf tables by word
+tf_idf_compare <- tf_idf_female %>%
+  select(word, tf_idf_female = tf_idf) %>%
+  inner_join(tf_idf_male %>% select(word, tf_idf_male = tf_idf), by = "word") %>%
+  mutate(gap = tf_idf_female - tf_idf_male)
+tf_idf_compare
+
+# women > Men's most obvious word (positive)
+tf_idf_compare %>% 
+  arrange(desc(gap)) %>% 
+  head(10)
+
+# men > women's most obvious words (negative)
+tf_idf_compare %>% 
+  arrange(gap) %>% 
+  head(10)
+
+#comparison visualization between female authors and male authors
+tf_idf_compare %>%
+  filter(abs(gap) > 0.01) %>%
+  mutate(word = reorder(word, gap)) %>%
+  ggplot(aes(x = gap, y = word)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "TF-IDF Gender Bias (Female vs Male)", x = "TF-IDF Female - Male", y = NULL)
+
+```
+
+The first figure shows the most discriminating words (top ten with the highest TF-IDF values) in each article written by female authors, revealing the content uniqueness and keyword preference of each article; the second figure presents the highly discriminating words of articles written by male authors in the same way. In terms of gender differences, articles by female authors more frequently use words such as “adolescents”, ‘participant’, “lgbtq”, “girl” and other words focusing on individual experiences and social identities, while male authors' essays highlighted words such as ‘music’, “theatre”, “mental”, “condition”, and other academic or structural topics. These high TF-IDF words have strong distinctiveness in their respective articles, indicating that authors of different genders have obvious differences in expressing their concerns, stances, or research frameworks; while between different articles, even for the same gender, the TF-IDF words show the unique language styles and research focuses of each article, emphasizing the thematic diversity and expression differences in content. with differences in expression.
+```{r}
+tf_idf_female %>%
+  group_by(essay) %>%
+  slice_max(order_by = tf_idf, n = 10) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = essay)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ essay, ncol = 2, scales = "free") + 
+  labs(x = "tf-idf", y = NULL)
+
+tf_idf_male %>%
+  group_by(essay) %>%
+  slice_max(order_by = tf_idf, n = 10) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = essay)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ essay, ncol = 2, scales = "free") + 
+  labs(x = "tf-idf", y = NULL)
+
+```
+
+This graph accurately illustrates the “representativeness difference” in word use along the gender dimension - we have selected the 20 words with the largest TF-IDF differences and compared their relative importance in female-dominated versus male-dominated articles (TF-IDF values).
+
+The horizontal axis is the TF-IDF value, which represents how “recognizable” a word is to an article in that gender group; each row is a word, and the bar chart compares the performance of that word side-by-side among male and female authors. As can be seen: 
+
+The words “adolescents”, “stress”, ‘participant’, " girl“ are significantly more represented in female authors' articles, indicating that they are more concerned with the themes of individuality, psychology, gender and social participation; 
+
+On the contrary, ‘music’ and ”condition" are more prominent in male authors' articles. On the contrary, words such as “music” and “condition” are more prominent among male authors, suggesting that they may prefer a more structured, systematic, or technical framework of analysis.
+
+In short, this figure reveals systematic differences in research focus and word choice styles between male and female authors, measuring the “discriminatory power” of each word through the TF-IDF, and thus revealing underlying differences in gender perspectives behind the writing.
+```{r}
+# Take the 20 words with the highest variance (gender bias)
+top_words_diff <- tf_idf_compare %>%
+  arrange(desc(abs(gap))) %>%
+  slice_head(n = 20)
+
+# Long formatting for ggplot
+top_words_long <- top_words_diff %>%
+  pivot_longer(cols = c(tf_idf_female, tf_idf_male),
+               names_to = "gender", values_to = "tf_idf") %>%
+  mutate(gender = ifelse(gender == "tf_idf_female", "Female", "Male"))
+
+# Juxtaposed bar charts
+top_words_long %>%
+  mutate(word = fct_reorder(word, tf_idf)) %>%
+  ggplot(aes(tf_idf, word, fill = gender)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Top Gender-Differentiated Words by TF-IDF",
+    x = "TF-IDF", y = NULL,
+    fill = "Gender"
+  ) +
+  theme_minimal()
+```
+
+## N-grams
+
+```{r}
+combined_female_raw <- bind_rows(Pascoe_essay, Albdour_essay, Payne_essay, Hinshaw_essay, Morales_essay)
+
+combined_male_raw <- bind_rows(Gamiel_essay, Elpus_essay, Ma_essay, Turcotte_essay, Smith_essay)
+
+combined_tot_raw <- bind_rows(
+  Pascoe_essay, Albdour_essay, Payne_essay, Hinshaw_essay, Morales_essay,
+  Gamiel_essay, Elpus_essay, Ma_essay, Turcotte_essay, Smith_essay
+)
+```
+
+We grouped the essays by author gender to enable comparative analysis.
+-combined_female_raw includes all essays by female authors.
+-combined_male_raw includes essays by male authors.
+-combined_tot_raw merges all texts for overall analysis.
+This structure allows both gender-specific and overall text analysis.
+
+### Bigrams
+
+```{r}
+# female bigrams
+female_bigrams <- combined_female_raw %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  filter(!is.na(bigram)) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word) %>%
+  count(word1, word2, sort = TRUE) %>%
+  unite(bigram, word1, word2, sep = " ")
+female_bigrams
+```
+
+This result shows the most frequent bigrams  found in female-authored essays after removing common stop words. The top bigrams such as “anti bullying”, “bullying victimization”, and “lgbtq students” highlight recurring themes related to school safety, identity, and social justice. These patterns suggest a strong focus on issues like discrimination, adolescent experience, and marginalized groups. The consistent appearance of “bullying” across multiple bigrams indicates its central role in the discourse.
+
+```{r}
+# male bigrams
+male_bigrams <- combined_male_raw %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  filter(!is.na(bigram)) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word) %>%
+  count(word1, word2, sort = TRUE) %>%
+  unite(bigram, word1, word2, sep = " ")
+male_bigrams
+```
+This result displays the most frequent bigrams in male-authored essays, highlighting key themes and repeated phrases. The top bigram, “mental health”, appears 87 times, indicating a strong focus on psychological well-being. Other common bigrams such as “health disorders”, “relational aggression”, and “middle school” suggest discussions around adolescent development, behavioral issues, and educational environments. Additionally, terms like “academic press” and “student level” reflect an academic and institutional perspective in male-authored discourse.
+
+### Trigrams
+
+```{r}
+trigram_results_by_gender <- combined_tot_raw %>%
+  unnest_tokens(trigram, text, token = "ngrams", n = 3) %>%
+  filter(!is.na(trigram)) %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word,
+         !word3 %in% stop_words$word) %>%
+  count(Gender, word1, word2, word3, sort = TRUE) %>%
+  unite(trigram, word1, word2, word3, sep = " ")
+
+trigram_results_by_gender
+```
+
+### Conditional n-grams
+
+```{r}
+female_trigrams <- trigram_results_by_gender %>% filter(Gender == "female")
+male_trigrams   <- trigram_results_by_gender %>% filter(Gender == "male")
+female_trigrams
+male_trigrams
+```
+Female-authored texts tend to emphasize social justice, gender, and policy.
+
+Male-authored texts lean toward mental health, behavior, and structural analysis.
+
+These differences reflect how author gender may influence the framing and focus of academic discourse on topics like bullying, education, and identity.
+
+### Combine with TF-IDF
+
+```{r}
+#female
+female_bigrams_tf_idf <- combined_female_raw %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  filter(!is.na(bigram)) %>%
+  separate(bigram, into = c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word) %>%
+  unite(bigram, word1, word2, sep = " ") %>%
+  count(essay, bigram, sort = TRUE) %>%        
+  bind_tf_idf(bigram, essay, n) %>%
+  arrange(desc(tf_idf))
+female_bigrams_tf_idf
+```
+
+```{r}
+#male
+male_bigrams_tf_idf <- combined_male_raw %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  filter(!is.na(bigram)) %>%
+  separate(bigram, into = c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word) %>%
+  unite(bigram, word1, word2, sep = " ") %>%
+  count(essay, bigram, sort = TRUE) %>%
+  bind_tf_idf(bigram, essay, n) %>%
+  arrange(desc(tf_idf))
+male_bigrams_tf_idf
+```
+Let's plot it.
+```{r}
+#female
+female_bigrams_tf_idf %>%
+  group_by(essay) %>%
+  slice_max(tf_idf, n = 5) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(bigram, tf_idf), fill = essay)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~essay,  ncol = 2,scales = "free") +
+  labs(x = "TF-IDF", y = NULL, title = "Top Bigrams by TF-IDF (Female Essays)")
+
+```
+
+This plot highlights the most distinctive bigrams in each female-authored essay, based on TF-IDF scores. Several key themes emerge:
+
+Cultural identity & race: The essay "Arab American Adolescents" features bigrams like “arab american” and “american adolescents”, emphasizing ethnic identity and youth experience.
+
+School environment & bullying: Essays such as "LGBTQ kids school safety" and "Immigrant children and school bullying" include terms like “lgbtq students”, “school climate”, and “unrecognized bullying”, revealing concerns about inclusive and safe educational settings.
+
+Gender & power: "Notes on a Sociology of Bullying" and "Regulating girlhood" introduce bigrams such as “gender socialization”, “girl bullying”, and “bullying legislation”, indicating a focus on gender roles and systemic control mechanisms.
+
+Overall, female-authored texts appear to prioritize themes of intersectionality, marginalized identities, and policy-oriented responses to bullying.
+
+```{r}
+#male
+male_bigrams_tf_idf %>%
+  group_by(essay) %>%
+  slice_max(tf_idf, n = 5) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(bigram, tf_idf), fill = essay)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~essay, ncol = 2, scales = "free") +
+  labs(x = "TF-IDF", y = NULL, title = "Top Bigrams by TF-IDF (Male Essays)")
+```
+
+The TF-IDF plot for male-authored essays reflects a different set of thematic interests:
+
+Mental health focus: The essay "Mental health and bullying" is dominated by bigrams like “mental health”, “health disorders”, and “depression anxiety”, showing a strong emphasis on psychological well-being and diagnoses.
+
+Empirical framing: "A qualitative investigation of bullying" contains phrases such as “field notes”, “card sort”, and date-based terms (“march 23 2015”), indicating a more data-driven or research-methodology approach.
+
+School structure & roles: In "Bullying in schools" and "Bullying victimization", terms like “victim relationships”, “school bullying”, and “theatre students” reflect analysis of student dynamics and group behavior.
+
+These essays tend to adopt a more clinical, structural, or research-focused lens, particularly in relation to student behavior and mental health.
+
+### Using n-grams for context and sentiment analysis
+
+female:
+```{r}
+AFINN <- get_sentiments("afinn")
+
+female_bigrams_separated <- combined_female_raw %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  filter(!is.na(bigram)) %>%
+  separate(bigram, into = c("word1", "word2"), sep = " ")
+
+female_not_words <- female_bigrams_separated %>%
+  filter(word1 == "not") %>%
+  inner_join(AFINN, by = c("word2" = "word")) %>%
+  count(word1, word2, value, sort = TRUE)
+
+female_not_words
+```
+This table shows bigrams from female-authored texts where the first word is “not”, joined with sentiment scores from the AFINN lexicon. It highlights how negation affects sentiment:
+
+Words like “like”, “confident”, and “care” usually have positive sentiment, but are negated by “not”, potentially flipping the emotional tone.
+
+Negations like “not anxious” or “not aggressive” cancel out negative sentiment, changing interpretation.
+
+This analysis helps reveal how negations modify emotional meaning in context.
+
+```{r}
+female_frequent_not_words <- female_not_words %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  head(20)
+female_frequent_not_words
+```
+
+This table shows the most impactful negated sentiment words in female-authored essays, based on AFINN scores.
+
+Words like “not want”, “not like”, and “not happy” would typically carry a positive sentiment, but are negated, reducing or reversing their emotional impact.
+
+Negative phrases like “not kill”, “not aggression”, or “not anxious” indicate negation of negative emotions, potentially softening the sentiment.
+
+The “contribution” column shows the overall emotional weight (frequency × sentiment value). For example, “not want” appears 9 times and has a sentiment value of 1, giving a total contribution of 9.
+
+This analysis highlights how negation alters emotional meaning, showing that simply counting positive/negative words isn’t enough—context matters.
+
+```{r}
+female_frequent_not_words %>%
+  ggplot(aes(n * value, word2, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(
+    x = "Sentiment value × number of occurrences",
+    y = "Words preceded by \"not\"",
+    title = "Negated sentiment words in female essays"
+  )
+```
+
+This plot shows the most frequent negated sentiment words in female-authored essays.
+
+Words like “not want”, “not like”, and “not happy” reduce or reverse positive sentiment, while “not kill” and “not aggression” soften negative terms. The bars represent the impact of negation, combining how often the phrase appears with its sentiment strength. This highlights how context, especially negation, shapes emotional meaning.
+
+```{r}
+negation_words <- c("not", "no", "never", "without")
+
+female_negated_words <- female_bigrams_separated %>%
+  filter(word1 %in% negation_words) %>%
+  inner_join(AFINN, by = c("word2" = "word")) %>%
+  count(word1, word2, value, sort = TRUE)
+
+```
+
+```{r}
+female_negated_words %>%
+  mutate(contribution = n * value,
+         sign = if_else(value > 0, "positive", "negative")) %>%
+  group_by(word1) %>% 
+  top_n(15, abs(contribution)) %>%
+  ungroup() %>%
+  ggplot(aes(y = reorder_within(word2, contribution, word1), 
+             x = contribution, 
+             fill = sign)) +
+  geom_col() + 
+  scale_y_reordered() + 
+  facet_wrap(~ word1, scales = "free") + 
+  labs(
+    y = 'Words preceded by a negation',
+    x = "Contribution (Sent value × count)",
+    title = "Most frequent sentiment words following negation (female)"
+  )
+
+```
+
+This plot shows how different negation words affect sentiment in female-authored essays.
+
+“Not” most commonly flips positive words like want, like, and happy, reducing their emotional positivity.
+
+“No” affects both positive (e.g., significant) and negative words (e.g., bullying, mistake), showing mixed sentiment shifts.
+
+“Never” appears mainly with the word noisy, reducing a negative term.
+
+Overall, the chart highlights how negation can reverse or soften sentiment, showing the subtle role of context in language.
+
+male:
+```{r}
+AFINN <- get_sentiments("afinn")
+
+male_bigrams_separated <- combined_male_raw %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  filter(!is.na(bigram)) %>%
+  separate(bigram, into = c("word1", "word2"), sep = " ")
+
+male_not_words <- male_bigrams_separated %>%
+  filter(word1 == "not") %>%
+  inner_join(AFINN, by = c("word2" = "word")) %>%
+  count(word1, word2, value, sort = TRUE)
+
+male_frequent_not_words <- male_not_words %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  head(20)
+
+male_frequent_not_words %>%
+  ggplot(aes(n * value, word2, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(
+    x = "Sentiment value × number of occurrences",
+    y = "Words preceded by \"not\"",
+    title = "Negated sentiment words in male essays"
+  )
+
+```
+
+This chart shows the most common sentiment words preceded by "not" in male-authored essays.
+
+Positive words like sure, okay, and supportive are frequently negated, flipping their sentiment. Some negative terms like afraid and aggression are also present, further emphasizing emotional tone reversal.
+
+Overall, it highlights how negation shifts meaning, especially around emotional or evaluative language.
+
+```{r}
+male_negated_words <- male_bigrams_separated %>%
+  filter(word1 %in% negation_words) %>%
+  inner_join(AFINN, by = c("word2" = "word")) %>%
+  count(word1, word2, value, sort = TRUE)
+
+male_negated_words %>%
+  mutate(
+    contribution = n * value,
+    sign = if_else(value > 0, "positive", "negative")
+  ) %>%
+  group_by(word1) %>% 
+  top_n(15, abs(contribution)) %>%
+  ungroup() %>%
+  ggplot(aes(y = reorder_within(word2, contribution, word1), 
+             x = contribution, 
+             fill = sign)) +
+  geom_col() + 
+  scale_y_reordered() + 
+  facet_wrap(~ word1, scales = "free") + 
+  labs(
+    y = 'Words preceded by a negation',
+    x = "Contribution (Sentiment × Frequency)",
+    title = "Most frequent sentiment words following negation (male)"
+  )
+
+```
+
+This chart visualizes the sentiment impact of negated words in male essays. Positive words like support, like, interested, and enjoy are often negated after "not", reversing their emotional tone. Meanwhile, negative terms like harm, bully, blame, and anxiety appear after "no", emphasizing concern or denial.
+
+Overall, this highlights how negation significantly alters meaning, especially around emotionally charged topics like bullying and support.
+
+### Visualizing a network of bigrams
+
+```{r}
+count_bigrams <- function(dataset) {
+  dataset %>%
+    unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+    separate(bigram, c("word1", "word2"), sep = " ") %>%
+    filter(!word1 %in% stop_words$word,
+           !word2 %in% stop_words$word) %>%
+    count(word1, word2, sort = TRUE)
+}
+
+visualize_bigrams <- function(bigram_df, min_count = 10) {
+  set.seed(2016)
+  a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+  
+  bigram_df %>%
+    filter(n >= min_count) %>%
+    graph_from_data_frame() %>%
+    ggraph(layout = "fr") +
+    geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                   arrow = a, end_cap = circle(.07, 'inches')) +
+    geom_node_point(color = "lightblue", size = 5) +
+    geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+    theme_void()
+}
+```
+
+female:
+```{r}
+library(stringr)
+
+female_bigrams_graph_data <- count_bigrams(combined_female_raw)
+
+female_bigrams_graph_data %>%
+  filter(n >= 5,                                   
+         !str_detect(word1, "\\d"),                
+         !str_detect(word2, "\\d")) %>%            
+  visualize_bigrams()
+```
+
+This bigram network graph for female essays visually maps out key word pairings that appear together frequently. Each arrow represents a common two-word phrase, where the direction shows word order, and the thickness reflects frequency.
+
+Central topics like "bullying victimization", "anti bullying programs", and "homophobic language" are highly connected, revealing recurring concerns around school safety and discrimination.
+
+The clusters around "arab american adolescents", "foreign born parent", and "immigrant children" suggest a strong focus on race, ethnicity, and identity.
+
+Terms like "perceived stress", "academic performance", and "gender socialization" indicate broader concerns with mental health, education, and social expectations.
+
+Overall, this graph illustrates how female authors emphasize the intersection of identity, environment, and systemic issues like bullying and bias.
+
+```{r}
+male_bigrams_graph_data <- count_bigrams(combined_male_raw)
+
+male_bigrams_graph_data %>%
+  filter(n >= 5,
+         !str_detect(word1, "\\d"),
+         !str_detect(word2, "\\d")) %>%
+  visualize_bigrams()
+```
+
+This bigram network graph for male essays reveals key word pairings and thematic clusters through frequently co-occurring terms.
+
+Mental health is a strong theme, with combinations like “mental health disorders” and “health disorder”, indicating concern for emotional well-being.
+
+The school context is also prominent, with links such as “middle school”, “school climate”, “student level”, and “anti bullying”, showing a focus on behavior and educational environments.
+
+Arts-related terms appear in “theatre students”, “performing arts”, and “music ensemble”, perhaps reflecting discussions around extracurriculars or gender norms.
+
+Clusters like “social relational aggression” and “bully victim cycle” highlight analysis of peer dynamics and conflict.
+
+This graph highlights how male essays emphasize mental health, school structure, and peer interaction, often through empirical or behavioral frameworks.
+
+### Correlating pairs of words
+
+```{r}
+female_section_words <- combined_female_raw %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word) %>%
+  mutate(section = row_number() %/% 10)
+
+female_section_words
+female_word_pairs <- female_section_words %>%
+  pairwise_count(word, section, sort = TRUE)
+
+female_word_pairs
+```
+
+The output shows the most common word co-occurrences within the same section in female-authored essays. Words like “school”, “bullying”, “students”, and “lgbtq” frequently appear together, highlighting key themes such as education, bullying, and identity. These co-occurrences suggest that female essays often discuss bullying in school settings, especially involving LGBTQ students.
+
+male:
+```{r}
+male_section_words <- combined_male_raw %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word) %>%
+  mutate(section = row_number() %/% 10)
+male_section_words
+
+male_word_pairs <- male_section_words %>%
+  pairwise_count(word, section, sort = TRUE)
+male_word_pairs
+```
+Here, we again see “school”, “bullying”, “mental”, “health”, and “victims”—but paired with terms like “survey”, “quantitative”, and “data” earlier in the pipeline. The word pairings like “mental” + “health” and “bullies” + “victims” hint at a clinical, analytical framing. Also notable: “theatre” + “students” and “music” + “theatre”, which suggest discussions around arts education and its social impact.
+Key difference:
+
+Female essays often combine social justice language with emotional/identity terms, while male essays more frequently include quantitative, academic, or structured observations, especially around mental health and behavioral studies.
+
+### Pairwise correlation
+
+female:
+```{r}
+female_word_cors <- female_section_words %>%
+  group_by(word) %>%
+  filter(n() >= 10) %>%         
+  pairwise_cor(word, section, sort = TRUE)
+
+female_word_cors
+female_word_cors %>%
+  filter(item1 %in% c("gender", "power", "school", "bullying")) %>%
+  group_by(item1) %>%
+  slice_max(correlation, n = 6) %>%
+  ungroup() %>%
+  mutate(item2 = reorder(item2, correlation)) %>%
+  ggplot(aes(item2, correlation, fill = item1)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ item1, scales = "free") +
+  coord_flip() +
+  labs(title = "Top correlated words in female essays")
+
+```
+
+This chart shows the strongest word correlations in female essays. Words like "bullying", "gender", "power", and "school" are central and often co-occur with contextually relevant terms. For example:
+
+"Bullying" is strongly linked with "anti", "victimization", and "unrecognized".
+
+"Gender" correlates highly with "sexuality", "heterosexuality", and "socialization".
+
+"Power" connects with "status", "systems", and "social".
+
+"School" is often associated with "climate", "environment", and "students".
+
+These correlations reflect thematic concerns like identity, structural issues, and social environments in female-authored essays.
+
+```{r}
+set.seed(2024)
+
+female_word_cors %>%
+  filter(correlation > 0.25,
+         !str_detect(item1, "\\d"),
+         !str_detect(item2, "\\d")) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightpink", size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_void() +
+  labs(title = "Word Correlation Network - Female Essays ")
+
+```
+
+This word correlation network from female essays highlights strong associations between key terms. For example:
+
+"gender", "lgbtq", and "sexuality" cluster together, reflecting a focus on identity and inclusion.
+
+"school", "safe", "spaces", and "performance" show links to educational environments and student experiences.
+
+Terms like "immigrant children", "race", and "ethnicity" point to attention on cultural and social diversity.
+
+"bullying" connects to "victimization", "homophobic", and "control", emphasizing power dynamics and discrimination.
+
+This network helps visualize how concepts like education, identity, and social inequality are interconnected in female-authored texts. 
+
+male:
+```{r}
+male_word_cors <- male_section_words %>%
+  group_by(word) %>%
+  filter(n() >= 10) %>%         
+  pairwise_cor(word, section, sort = TRUE)
+
+male_word_cors
+male_word_cors %>%
+  filter(item1 %in% c("gender", "power", "school", "bullying")) %>%
+  group_by(item1) %>%
+  slice_max(correlation, n = 6) %>%
+  ungroup() %>%
+  mutate(item2 = reorder(item2, correlation)) %>%
+  ggplot(aes(item2, correlation, fill = item1)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ item1, scales = "free") +
+  coord_flip() +
+  labs(title = "Top correlated words in female essays")
+```
+
+The reason for choosing the four keywords “bullying,” “gender,” “power,” and “school” in both male and female essay correlation analysis is because these words represent core themes across the texts, reflecting the main research focuses and social issues addressed. Here's a brief rationale for each:
+
+Bullying: Central topic in all essays—frequent, highly correlated with many other keywords like "victimization," "behavior," "anti," etc.
+
+Gender: Critical in differentiating themes between male and female essays—links to identity, inequality, and social roles.
+
+Power: Often discussed in relation to control, social dynamics, and relationships—reveals underlying structures in bullying.
+
+School: Common setting in the essays—key to understanding context, environment, and institutional influence.
+
+These keywords help highlight thematic connections, compare conceptual focus by gender, and visualize social constructs that underpin the narratives and findings in the essays.
+
+```{r}
+set.seed(2024)
+
+male_word_cors %>%
+  filter(correlation > 0.25,
+         !str_detect(item1, "\\d"),
+         !str_detect(item2, "\\d")) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE, max.overlaps = Inf) +
+  theme_void() +
+  labs(title = "Word Correlation Network - Male Essays")
+```
+
+This Word Correlation Network for Male Essays shows how frequently certain words co-occur in similar sections of text, highlighting clusters of related concepts.
+
+Mental Health Focus: Strong connections around words like mental, health, disorders, depression, anxiety, and diagnosis indicate a focus on psychological well-being.
+
+Education & Music Clusters: Terms like students, music, theatre, choir, orchestra, and nonmusic form a distinct cluster, suggesting discussion around school-based arts education.
+
+Bullying Dynamics: Words like bully, victim, cycle, and esteem connect with bullying-related discussions, often paired with psychological terms.
+
+Gender & Social Terms: Words such as gender, teachers, boys, girls, females, and males indicate exploration of gender roles and social identity.
+
+Overall, this network reflects how male-authored essays may lean toward structured, empirical analysis while still covering emotional and social dimensions.
+
+## Topic Modelling 
+
+We decided to use this model to test our research question, hoping that by dividing our main dataset of essays into two topics, we could observe a distinction between those written by men and those written by women.
+Additionally, we extended this analysis by increasing the number of topics to explore whether the differentiation would change, and in what way.
+
+### Preparing tbhe LDA model
+
+First, we need to transform our dataset into a tidy dataframe. To do this, we split the original dataset by "essay" in order to apply the LDA method to the essays themselves.
+
+```{r}
+#let's exclude all the tokens that are compone only by digit for our analysis 
+
+numeric_stop <- combined_tot |> 
+  filter(str_detect(word, "^[0-9]+$")) |> 
+  distinct(word) |> 
+  mutate(lexicon = "numeric")
+
+stop_words_ext <- bind_rows(stop_words, numeric_stop)
+
+combined_tot_lda <- combined_tot |> 
+  anti_join(stop_words_ext, by = "word")
+
+#let's transform our dataset in a dataframe 
+
+tidy_counts <- combined_tot_lda |> 
+  count(essay, word, name = "count") |> 
+  filter(!is.na(count) & count > 0) |> 
+  mutate(count = as.integer(count))
+
+dtm <- tidy_counts |> 
+  cast_dtm(document = essay, term = word, value = count)
+
+print(dtm)
+
+#cast LDA with 2 topics
+lda<- LDA(dtm, k = 2, control = list(seed = 1234))
+```
+We can see that the matrix contains a total of 5,365 terms across the documents. The sparsity is 81%, which is relatively high—meaning that only about 19% of the cells in the matrix contain non-zero values. This core of non-zero entries represents the meaningful words that the LDA model will later use to help us identify the topics.
+
+### Most probable words for each topic
+
+Now we will examine the most probable words (looking at the beta score that we will receve after we applied the function) for each of the two topics. This will help us describe, or at least gain an intuition about, what differentiates the two topics based on the words they contain.
+
+```{r}
+# generate the beta score for every significant term for each of the 2 topics
+
+ap_topics <- tidy(lda, matrix = "beta")
+ap_topics
+```
+
+```{r}
+# look which word is most rapresentative on each topic 
+
+  ap_top_terms <- ap_topics |> 
+  group_by(topic) |> 
+  slice_max(beta, n = 10) |> 
+  ungroup() |> 
+  arrange(topic, -beta)
+
+ap_top_terms
+```
+
+```{r}
+# creating a plot to visually understand more the differences between the 2 topic
+
+ap_top_terms |> 
+  mutate(term = reorder_within(term, beta, topic)) |> 
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
+Looking at the bar plot, we can begin to identify the focus and perspective on bullying within the two different topics:
+
+- In the first one (the red one), we see many words that reflect specific roles in bullying ('victims', 'bullies'), as well as terms related to extracurricular activities ('theatre', 'music'). Compared to the second topic, there is also a heavier use of the word 'school'. We can imagine that the essays grouped under this topic are primarily centered on bullying in school environments, with a strong focus on victimization and student experiences.
+
+- In the second topic (the light blue one), there is a greater presence of words related to social structures and identities ('social', 'gender', 'LGBTQ') as well as to general health ('mental', 'health'). We can imagine that the essays categorized under this topic adopt a more identity-based perspective on bullying, emphasizing issues related to gender, mental health, and LGBTQ+ experiences.
+
+### Greatest difference
+
+We will now compare the beta score of single meaningful words to see the precise difference betweent the 2 topics. 
+
+```{r}
+beta_wide <- ap_topics |> 
+  mutate(topic = paste0("topic", topic)) |> 
+  pivot_wider(names_from = topic, values_from = beta) |> 
+  filter(topic1 > .001 | topic2 > .001) |> 
+  mutate(log_ratio = log2(topic2 / topic1))
+
+beta_wide
+```
+
+```{r}
+bw_filtered <- beta_wide |> 
+  filter(abs(log_ratio) >= 10) 
+
+ggplot(data = bw_filtered, aes(x = log_ratio, y = reorder_within(term, topic2 / topic1, log_ratio))) +
+geom_col(position = "dodge") +
+  scale_fill_manual(values = c("gray40", "steelblue")) +
+  theme_minimal() +
+  labs(x = "Log Ratio of Topic 2 to Topic 1", y = "Topic") +
+  ggtitle("Comparison of Topic Beta Values")
+```
+This graph allows us to clearly compare the log ratios of word probabilities (beta) between topic 2 and topic 1 in our model. Positive values indicate words more strongly associated with the second topic, while negative values indicate words more strongly associated with the firs one. Overall, the results support our previous assumptions.
+
+- In topic 2, the most distinctive and frequent words are ideological, identity-based, and sociologically oriented. We see terms such as targeting, discourses, LGBTQ, marginalization, sexuality, socialization, gay, homophobic, fag, and inequality. Many of these words were also highlighted in our earlier analysis of the most probable words per topic.
+
+- On the other hand, topic 1 reveals some new terms that slightly change our earlier interpretation. Here, we see words like cycle, affective, immigrant, unrecognized, grades, Asian, band, performing, ensemble, arts, and theatre. These suggest that essays in this topic are more school-centered and experience-based, with a focus on students’ roles, behaviors, academic performance, and personal experiences with bullying.
+
+In summary, we can say that the first topic is more aligned with “bullying in practice” (emphasizing school, behavior, and personal context) whereas the second topic aligns with “bullying in theory” (focus on social structures, identity, and power).
+
+### Document-topic probabilities
+
+Now we can try to represent and see if our research question on man and women writing in different styles and about different topics is true or not. 
+
+```{r}
+# build a lookup for the gender of the researcher
+gender_lookup <- combined_tot |> 
+  distinct(essay, Gender)
+
+# now we can compute to obtain the gamma relations between the documents and the topics
+ap_documents <- tidy(lda, matrix = "gamma") |> 
+  left_join(gender_lookup, by = c("document" = "essay"))
+
+ap_documents
+```
+
+```{r}
+ap_documents |> 
+  mutate(doc_reorder = reorder_within(document, gamma, topic)) %>%
+  ggplot(aes(x = gamma, y = doc_reorder, fill = Gender)) +
+    geom_col(show.legend = TRUE) +
+    scale_fill_manual(values = c(female = "pink", male = "lightblue")) +
+    facet_wrap(~ topic, scales = "free_y", ncol = 1,
+               labeller = labeller(topic = c(`1`="Topic 1", `2`="Topic 2"))) +
+    scale_y_reordered() + 
+    labs(
+      x = expression(gamma), 
+      y = NULL,
+      fill = "Gender",
+      title = "Document – Topic Membership (γ) by Gender"
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid.major.y = element_blank(),
+      axis.text.y = element_text(size = 8)
+    )
+```
+We found a clear separation between topics: male-authored essays had higher γ-values for topic 1, while female-authored essays clustered around the second topic. This supports our research question, although we initially expected a more sharply defined division between the genders represented in each topic.
+
+### Adding a third topic
+
+```{r}
+lda<- LDA(dtm, k = 3, control = list(seed = 1234))
+
+ap_3_topics <- tidy(lda, matrix = "beta")
+
+ap_top_terms <- ap_3_topics |> 
+  group_by(topic) |> 
+  slice_max(beta, n = 10) |> 
+  ungroup() |> 
+  arrange(topic, -beta)
+
+ap_top_terms |> 
+  mutate(term = reorder_within(term, beta, topic)) |> 
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
+Looking at the most probable words for each topic represantation we can say that:
+
+- there is not much change in the topic 1 and 2, only some variation on the beta of some words.
+
+- In the third topic (the blue one), we find terms like children, boys, victimization, adolescents, and stress, which suggest a more developmental or psychological framing of bullying. Unlike Topic 1, which highlights school context and activities, or Topic 2, which leans into identity and systemic concerns, Topic 3 appears to focus more on age, gender dynamics among youth, emotional stress, and behavioral outcomes. But we have to highlight the fact that the majority of the most significant words have a beta score of < 0.01 suggesting that this topic could be a recipient of the essays that do not fit perfectly in the first two topics.
+
+```{r}
+
+beta_wide <- ap_3_topics |> 
+  mutate(topic = paste0("topic", topic)) |> 
+  pivot_wider(names_from = topic, values_from = beta) |> 
+  # keep only words that appear with beta > .001 in at least one topic
+  filter(topic1 >  .005 |
+         topic2 >  .005 |
+         topic3 >  .005)
+
+beta_long <- beta_wide |> 
+  # compute two log-ratios vs. Topic 1
+  mutate(
+    log2_3_vs_2 = log2(topic3 / topic2),
+    log2_3_vs_1 = log2(topic3 / topic1)
+  ) |> 
+  pivot_longer(
+    cols      = starts_with("log2_"),
+    names_to  = "comparison",
+    values_to = "log_ratio"
+  ) |> 
+  # only show terms with a strong log-ratio effect
+  filter(abs(log_ratio) >= 1)
+
+ggplot(beta_long, 
+       aes(x = log_ratio,
+           y = reorder_within(term, log_ratio, comparison),
+           fill = comparison)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ comparison, 
+             scales = "free_y", 
+             labeller = labeller(
+               log2_3_vs_2 = "Topic 3 vs Topic 2",
+               log2_3_vs_1 = "Topic 3 vs Topic 1"
+             )) +
+  scale_y_reordered() +
+  scale_fill_manual(values = c(
+    log2_3_vs_2 = "steelblue",
+    log2_3_vs_1 = "gray40"
+  )) +
+  labs(
+    title = "Log₂ Ratios of Word-in-Topic Probabilities",
+    x     = "Log₂ (β in topic 3 / β in the others topics)",
+    y     = "Term"
+  ) +
+  theme_minimal()
+
+```
+This graph allows us to clearly compare the log ratios of word probabilities (beta) between Topic 3 and Topic 1 (left panel), and Topic 3 and Topic 2 (right panel) in our model.
+
+- In the comparison between Topic 3 and Topic 1 (left), we see that the most distinctive words in Topic 3 include homophobic, arab, stress, LGBTQ, adolescents, youth, health, american, bullied, mental, and participants. These terms suggest that Topic 3 is particularly focused on identity-based and socio-demographic factors related to bullying, especially within ethnic, national, and psychological contexts.
+
+- In the comparison between Topic 3 and Topic 2 (right), we again see arab and adolescents as highly distinctive terms for Topic 3, along with music, americans, bullied, and victimization. These words highlight the demographic and behavioral aspects of bullying.
+
+```{r}
+ap_documents <- tidy(lda, matrix = "gamma") |> 
+  left_join(gender_lookup, by = c("document" = "essay"))
+
+ap_documents |> 
+  mutate(doc_reorder = reorder_within(document, gamma, topic)) %>%
+  ggplot(aes(x = gamma, y = doc_reorder, fill = Gender)) +
+    geom_col(show.legend = TRUE) +
+    scale_fill_manual(values = c(female = "pink", male = "lightblue")) +
+    facet_wrap(~ topic, scales = "free_y", ncol = 1,
+               labeller = labeller(topic = c(`1`="Topic 1", `2`="Topic 2", `3`="Topic 3" ))) +
+    scale_y_reordered() + 
+    labs(
+      x = expression(gamma), 
+      y = NULL,
+      fill = "Gender",
+      title = "Document – Topic Membership (γ) by Gender"
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid.major.y = element_blank(),
+      axis.text.y = element_text(size = 8)
+    )
+```
+We can see that adding a third topic skewed the results that we obtained in our first part of the analysis. Now topic 1 is entirely composed by essays written by male authors and topic 2 is now composed by 2/3 of female authors. The topic 3 is more balanced, but still shows a slight skew toward female authorship, with documents like Arab American Adolescents and Regulating Girlhood present. The gamma values are more evenly distributed, and no topic in this model is dominated exclusively by one gender
+
+### Summary
+
+This study analyzed essays written by male and female authors, focusing on thematic patterns, word associations, and sentiment differences.
+
+1.Topical Focus by Gender
+
+-Female essays emphasized bullying victimization, Arab American adolescents, LGBTQ students, and gender socialization.
+
+-Male essays focused more on mental health disorders, academic performance, and music/theatre students.
+
+2.TF-IDF Bigram Analysis
+
+-In female essays, high TF-IDF bigrams included “unrecognized bullying”, “homophobic bullying”, and “girl bullying”, highlighting attention to marginalized identities.
+
+-In male essays, frequent bigrams were “mental health”, “bully victim”, and “band choir orchestra”, reflecting psychological and extracurricular concerns.
+
+3.Sentiment and Negation Analysis
+
+-Female authors often used negated sentiment expressions like “not want”, “not happy”, and “not like”, with both positive and negative emotional effects.
+
+-Male authors used negations like “not enjoy”, “not support”, and “not bully”, showing less emotional range and more factual tone.
+
+4.Word Network and Correlation
+
+-In female word networks, key clusters formed around bullying, gender, power, and school, showing tight associations with social issues like harassment, exclusion, and inequality.
+
+-In male networks, clusters were more academic and data-driven, with strong links between mental health, diagnosis, probability, and academic status.
+
+5. Topic Modeling (LDA) and Gendered Themes
+
+-Topic 1 was characterized by words such as victims, bullies, theatre, music, and school. These terms suggest a school-centered, behavior-oriented perspective on bullying, grounded in student roles, experiences, and extracurricular settings.
+
+-Topic 2, in contrast, was defined by terms like social, gender, LGBTQ, mental, and health. This points to an identity-based, sociologically-oriented discourse, emphasizing systemic and psychological dimensions of bullying.
+
+-A clear gender division emerged: male-authored essays had higher γ-values for Topic 1, while female-authored essays clustered around Topic 2. Although we expected a more sharply defined split, this pattern supports our hypothesis that gendered authorship influences thematic emphasis.
+
+-Further log-ratio analysis reinforced these insights. Words such as targeting, marginalization, sexuality, and inequality were far more prevalent in Topic 2, while Topic 1 featured terms like grades, arts, immigrant, and ensemble. This lexical divide reinforces the idea that Topic 1 reflects “bullying in practice” (contextual, behavioral), while Topic 2 represents “bullying in theory” (structural, identity-focused).
